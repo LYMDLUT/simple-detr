@@ -53,10 +53,10 @@ class Transformer(nn.Module):
                  return_intermediate_dec=False):
         super().__init__()
 
-        encoder_layer = TransformerEncoderLayer(d_model, nhead, dim_feedforward,
-                                                dropout, activation, normalize_before)
-        encoder_norm = nn.LayerNorm(d_model) if normalize_before else None
-        self.encoder = TransformerEncoder(encoder_layer, num_encoder_layers, encoder_norm)
+        # encoder_layer = TransformerEncoderLayer(d_model, nhead, dim_feedforward,
+        #                                         dropout, activation, normalize_before)
+        # encoder_norm = nn.LayerNorm(d_model) if normalize_before else None
+        # self.encoder = TransformerEncoder(encoder_layer, num_encoder_layers, encoder_norm)
 
         decoder_layer = TransformerDecoderLayer(d_model, nhead, dim_feedforward,
                                                 dropout, activation, normalize_before)
@@ -78,15 +78,20 @@ class Transformer(nn.Module):
 
     def forward(self, src, mask, query_embed, pos_embed):
         # flatten NxCxHxW to HWxNxC
-        bs, c, h, w = src.shape
-        src = src.flatten(2).permute(2, 0, 1)
-        pos_embed = pos_embed.flatten(2).permute(2, 0, 1)
+        src2,pos_embed2,mask2=[],[],[]
+        for src1 ,pos_embed1, mask1 in zip(src, pos_embed, mask):
+            bs, c, h, w = src1.shape
+            src2.append(src1.flatten(2).permute(2, 0, 1))
+            pos_embed2.append(pos_embed1.flatten(2).permute(2, 0, 1))
+            mask2.append(mask1.flatten(1))
         query_embed = query_embed.unsqueeze(1).repeat(1, bs, 1)
-        mask = mask.flatten(1)
+        src = src2
+        pos_embed = pos_embed2
+        mask = mask2
 
         tgt = torch.zeros_like(query_embed)
-        memory = self.encoder(src, src_key_padding_mask=mask, pos=pos_embed)
-        hs, references = self.decoder(tgt, memory, memory_key_padding_mask=mask,
+        #memory = self.encoder(src, src_key_padding_mask=mask, pos=pos_embed)
+        hs, references = self.decoder(tgt, src, memory_key_padding_mask=mask,
                           pos=pos_embed, query_pos=query_embed)
         return hs, references
 
@@ -142,6 +147,18 @@ class TransformerDecoder(nn.Module):
         reference_points = reference_points_before_sigmoid.sigmoid().transpose(0, 1)
 
         for layer_id, layer in enumerate(self.layers):
+            if layer_id == 0 or layer_id ==1:
+                memory1 = memory[2]
+                pos1 = pos[2]
+                memory_key_padding_mask1=memory_key_padding_mask[2]
+            elif layer_id ==2 or layer_id ==3:
+                memory1 = memory[1]
+                pos1 = pos[1]
+                memory_key_padding_mask1=memory_key_padding_mask[1]
+            elif layer_id ==4 or layer_id ==5:
+                memory1 = memory[0]
+                pos1 = pos[0]
+                memory_key_padding_mask1=memory_key_padding_mask[0]
             obj_center = reference_points[..., :2].transpose(0, 1)      # [num_queries, batch_size, 2]
 
             # For the first decoder layer, we do not apply transformation over p_s
@@ -154,11 +171,11 @@ class TransformerDecoder(nn.Module):
             query_sine_embed = gen_sineembed_for_position(obj_center)     
             # apply transformation
             query_sine_embed = query_sine_embed * pos_transformation
-            output = layer(output, memory, tgt_mask=tgt_mask,
+            output = layer(output, memory1, tgt_mask=tgt_mask,
                            memory_mask=memory_mask,
                            tgt_key_padding_mask=tgt_key_padding_mask,
-                           memory_key_padding_mask=memory_key_padding_mask,
-                           pos=pos, query_pos=query_pos, query_sine_embed=query_sine_embed,
+                           memory_key_padding_mask=memory_key_padding_mask1,
+                           pos=pos1, query_pos=query_pos, query_sine_embed=query_sine_embed,
                            is_first=(layer_id == 0))
             if self.return_intermediate:
                 intermediate.append(self.norm(output))

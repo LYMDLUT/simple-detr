@@ -46,7 +46,10 @@ class ConditionalDETR(nn.Module):
         self.class_embed = nn.Linear(hidden_dim, num_classes)
         self.bbox_embed = MLP(hidden_dim, hidden_dim, 4, 3)
         self.query_embed = nn.Embedding(num_queries, hidden_dim)
-        self.input_proj = nn.Conv2d(backbone.num_channels, hidden_dim, kernel_size=1)
+        self.input_proj = []
+        self.input_proj.append(nn.Conv2d(512,  hidden_dim, kernel_size=1).cuda())
+        self.input_proj.append(nn.Conv2d(1024, hidden_dim, kernel_size=1).cuda())
+        self.input_proj.append(nn.Conv2d(2048, hidden_dim, kernel_size=1).cuda())
         self.backbone = backbone
         self.aux_loss = aux_loss
 
@@ -77,10 +80,15 @@ class ConditionalDETR(nn.Module):
         if isinstance(samples, (list, torch.Tensor)):
             samples = nested_tensor_from_tensor_list(samples)
         features, pos = self.backbone(samples)
-
-        src, mask = features[-1].decompose()
+        src = []
+        mask = []
+        for i, feature in enumerate(features):
+            src1, mask1 = feature.decompose()
+            src1 = self.input_proj[i](src1)
+            src.append(src1)
+            mask.append(mask1)
         assert mask is not None
-        hs, reference = self.transformer(self.input_proj(src), mask, self.query_embed.weight, pos[-1])
+        hs, reference = self.transformer(src, mask, self.query_embed.weight, pos)
         
         reference_before_sigmoid = inverse_sigmoid(reference)
         outputs_coords = []
